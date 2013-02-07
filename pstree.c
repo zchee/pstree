@@ -199,7 +199,7 @@ static struct TreeChars TreeChars[] = {
 }, *C;
 
 int MyPid, NProc, Columns, RootPid;
-short showall = TRUE, soption = FALSE, Uoption = FALSE, Hoption = FALSE;
+short showall = TRUE, soption = FALSE, Uoption = FALSE, Hoption = FALSE, noption = FALSE;
 char *name = "", *str = NULL, *Progname;
 long ipid = -1;
 char *input = NULL;
@@ -708,7 +708,8 @@ void PrintTree(int idx, const char *head) {
 	   EXIST(P[idx].child)       ? C->p   : C->s2,
 	   P[idx].pid == P[idx].pgid ? C->pgl : C->npgl,
 	   C->eg,
-	   P[idx].pid, P[idx].name,
+	   P[idx].pid,
+	   !noption ? P[idx].name : "",
 	   thread,
 	   P[idx].cmd
 	   /*,P[idx].child,P[idx].sister,P[idx].print*/);
@@ -753,6 +754,7 @@ void Usage(void) {
 	  "   -s string show only branches containing process with <string> in commandline\n"
 	  "   -p pid    show only branches containing process <pid>\n"
 	  "   -H        show only selected subtrees (hide parents)\n"
+	  "   -n        hide usernames\n"
 	  "   -w        wide output, not truncated to window width\n"
 	  "   pid ...   process ids to start from, default is 1 (init)\n"
 	  "             use 0 to also show kernel processes\n"
@@ -776,7 +778,7 @@ int main(int argc, char **argv) {
   Progname = strrchr(argv[0],'/');
   Progname = (NULL == Progname) ? argv[0] : Progname + 1;
   
-  while ((ch = getopt(argc, argv, "df:g:hl:p:s:u:Uw?H")) != EOF)
+  while ((ch = getopt(argc, argv, "df:g:hl:p:s:u:Uw?Hn")) != EOF)
     switch(ch) {
       /*case 'a':
 	align   = TRUE;
@@ -804,6 +806,9 @@ int main(int argc, char **argv) {
       break;                                  /* LOPTION */
     case 'H':
       Hoption = TRUE;
+      break;
+    case 'n':
+      noption = TRUE;
       break;
     case 'p':
       showall = FALSE;

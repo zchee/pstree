@@ -698,7 +698,7 @@ void PrintTree(int idx, const char *head) {
  
   
   snprintf(out, sizeof(out),
-	   "%s%s%s%s%s%s %05ld %s %s%s" /*" (ch=%d, si=%d, pr=%d)"*/,
+	   "%s%s%s%s%s%s %5ld %s %s%s" /*" (ch=%d, si=%d, pr=%d)"*/,
 	   C->sg,
 	   head,
 	   head[0] == '\0' ? "" : EXIST(P[idx].sister) ? C->barc : C->barl,

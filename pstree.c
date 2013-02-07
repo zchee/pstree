@@ -199,7 +199,7 @@ static struct TreeChars TreeChars[] = {
 }, *C;
 
 int MyPid, NProc, Columns, RootPid;
-short showall = TRUE, soption = FALSE, Uoption = FALSE, Hoption = FALSE, noption = FALSE;
+short showall = TRUE, soption = FALSE, Uoption = FALSE, Hoption = FALSE, noption = FALSE, roption = FALSE;
 char *name = "", *str = NULL, *Progname;
 long ipid = -1;
 char *input = NULL;
@@ -683,7 +683,7 @@ void DropProcs(void) {
     for (sister = P[me].sister;
 	 EXIST(sister) && !P[sister].print; sister = P[sister].sister);
     P[me].sister = sister;
-    if (!showall && P[me].pid == 1)
+    if (roption && P[me].pid == 1)
       P[me].hidden = TRUE;
   }
 }
@@ -755,6 +755,7 @@ void Usage(void) {
 	  "   -p pid    show only branches containing process <pid>\n"
 	  "   -H        show only selected subtrees (hide parents)\n"
 	  "   -n        hide usernames\n"
+	  "   -r        hide root process (pid 1)\n"
 	  "   -w        wide output, not truncated to window width\n"
 	  "   pid ...   process ids to start from, default is 1 (init)\n"
 	  "             use 0 to also show kernel processes\n"
@@ -778,7 +779,7 @@ int main(int argc, char **argv) {
   Progname = strrchr(argv[0],'/');
   Progname = (NULL == Progname) ? argv[0] : Progname + 1;
   
-  while ((ch = getopt(argc, argv, "df:g:hl:p:s:u:Uw?Hn")) != EOF)
+  while ((ch = getopt(argc, argv, "df:g:hl:p:s:u:Uw?Hnr")) != EOF)
     switch(ch) {
       /*case 'a':
 	align   = TRUE;
@@ -809,6 +810,9 @@ int main(int argc, char **argv) {
       break;
     case 'n':
       noption = TRUE;
+      break;
+    case 'r':
+      roption = TRUE;
       break;
     case 'p':
       showall = FALSE;

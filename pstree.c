@@ -215,6 +215,7 @@ struct Proc {
   long uid, pid, ppid, pgid;
   char name[32], cmd[MAXLINE];
   int  print;
+  int  hidden;
   long parent, child, sister;
   unsigned long thcount;
 } *P;
@@ -679,6 +680,8 @@ void DropProcs(void) {
     for (sister = P[me].sister;
 	 EXIST(sister) && !P[sister].print; sister = P[sister].sister);
     P[me].sister = sister;
+    if (!showall && P[me].pid == 1)
+      P[me].hidden = TRUE;
   }
 }
 
@@ -708,11 +711,15 @@ void PrintTree(int idx, const char *head) {
 	   /*,P[idx].child,P[idx].sister,P[idx].print*/);
   
   out[Columns-1] = '\0';
-  puts(out);
+  if (P[idx].hidden) {
+    snprintf(nhead, sizeof(nhead), "%s", head);
+  } else {
+    puts(out);
   
-  /* Process children */
-  snprintf(nhead, sizeof(nhead), "%s%s ", head,
-	   head[0] == '\0' ? "" : EXIST(P[idx].sister) ? C->bar : " ");
+    /* Process children */
+    snprintf(nhead, sizeof(nhead), "%s%s ", head,
+        head[0] == '\0' ? "" : EXIST(P[idx].sister) ? C->bar : " ");
+  }
   
   for (child = P[idx].child; EXIST(child); child = P[child].sister)
     PrintTree(child, nhead);

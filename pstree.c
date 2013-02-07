@@ -765,7 +765,7 @@ int main(int argc, char **argv) {
   extern char *optarg;
   int ch;
   long pid;
-  int graph = G_ASCII, wide = FALSE;
+  int graph = G_UTF8, wide = FALSE;
   
   C = &TreeChars[graph];
   

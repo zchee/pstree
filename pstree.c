@@ -199,7 +199,7 @@ static struct TreeChars TreeChars[] = {
 }, *C;
 
 int MyPid, NProc, Columns, RootPid;
-short showall = TRUE, soption = FALSE, Uoption = FALSE;
+short showall = TRUE, soption = FALSE, Uoption = FALSE, Hoption = FALSE;
 char *name = "", *str = NULL, *Progname;
 long ipid = -1;
 char *input = NULL;
@@ -215,6 +215,7 @@ struct Proc {
   long uid, pid, ppid, pgid;
   char name[32], cmd[MAXLINE];
   int  print;
+  int  selected;
   int  hidden;
   long parent, child, sister;
   unsigned long thcount;
@@ -639,9 +640,11 @@ void MarkProcs(void) {
 	     && NULL != strstr(P[me].cmd, str)
 	     && P[me].pid != MyPid)		/* for -s */
 	 ) {
+	P[me].selected = TRUE;
 	/* Mark parents */
 	for (parent = P[me].parent; EXIST(parent); parent = P[parent].parent) {
 	  P[parent].print = TRUE;
+	  if (Hoption) P[parent].hidden = TRUE;
 	}
 	/* Mark children */
 	MarkChildren(me);
@@ -711,7 +714,7 @@ void PrintTree(int idx, const char *head) {
 	   /*,P[idx].child,P[idx].sister,P[idx].print*/);
   
   out[Columns-1] = '\0';
-  if (P[idx].hidden) {
+  if (P[idx].hidden && !P[idx].selected) {
     snprintf(nhead, sizeof(nhead), "%s", head);
   } else {
     puts(out);
@@ -736,7 +739,7 @@ void Usage(void) {
 #ifdef DEBUG
 	  "[-d] "
 #endif
-	  "[-f file] [-g n] [-u user] [-U] [-s string] [-p pid] [-w] [pid ...]\n"
+	  "[-f file] [-g n] [-u user] [-U] [-s string] [-H] [-p pid] [-w] [pid ...]\n"
 	  /*"   -a        align output\n"*/
 #ifdef DEBUG
 	  "   -d        print debugging info to stderr\n"
@@ -749,6 +752,7 @@ void Usage(void) {
 	  "   -U        don't show branches containing only root processes\n"
 	  "   -s string show only branches containing process with <string> in commandline\n"
 	  "   -p pid    show only branches containing process <pid>\n"
+	  "   -H        show only selected subtrees (hide parents)\n"
 	  "   -w        wide output, not truncated to window width\n"
 	  "   pid ...   process ids to start from, default is 1 (init)\n"
 	  "             use 0 to also show kernel processes\n"
@@ -772,7 +776,7 @@ int main(int argc, char **argv) {
   Progname = strrchr(argv[0],'/');
   Progname = (NULL == Progname) ? argv[0] : Progname + 1;
   
-  while ((ch = getopt(argc, argv, "df:g:hl:p:s:u:Uw?")) != EOF)
+  while ((ch = getopt(argc, argv, "df:g:hl:p:s:u:Uw?H")) != EOF)
     switch(ch) {
       /*case 'a':
 	align   = TRUE;
@@ -798,6 +802,9 @@ int main(int argc, char **argv) {
       maxLdepth = atoi(optarg);               /* LOPTION */
       if(maxLdepth < 1) maxLdepth = 1;        /* LOPTION */
       break;                                  /* LOPTION */
+    case 'H':
+      Hoption = TRUE;
+      break;
     case 'p':
       showall = FALSE;
       ipid    = atoi(optarg);

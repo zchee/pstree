@@ -3,7 +3,7 @@
 Introduction:
 -------------
 
-   This is pstree V 2.33. It is a small program that shows the ps
+   This is pstree V 2.39. It is a small program that shows the ps
    listing as a tree (as the name implies...). It has several options
    to make selection criteria and to change the output style.
 
@@ -20,11 +20,21 @@ Introduction:
 Compilation:
 ------------
 
-   Take an ANSI C compiler, eg. gcc, and just enter
+   Take an ANSI C compiler, eg., gcc, and just enter
 
    $ [g]cc -O -o pstree pstree.c
 
-   There is no Makefile. Have fun, Fred
+   There is no Makefile.
+
+Installation:
+------------
+
+   Put pstree into appropriate bindir, e.g., /usr/local/bin.
+   Optionally, put the manpage pstree.1 to, e.g., /usr/local/share/man/man1.
+
+   Have fun, 
+
+        Fred
 
 Changes:
 --------

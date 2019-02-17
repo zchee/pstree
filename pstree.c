@@ -1,14 +1,14 @@
-/*	This is pstree written by Fred Hucht (c) 1993-2010	*
- *	EMail: fred AT thp.Uni-Duisburg.de			*
+/*	This is pstree written by Fred Hucht (c) 1993-2015	*
+ *	EMail: fred AT thp.uni-due.de				*
  *	Feel free to copy and redistribute in terms of the	*
  * 	GNU public license. 					*
  *
- * $Id: pstree.c,v 2.33 2009-11-10 22:12:39+01 fred Exp $
+ * $Id: pstree.c,v 2.39 2015/05/13 12:24:47 fred Exp $
  */
 static char *WhatString[]= {
-  "@(#)pstree $Revision: 2.33 $ by Fred Hucht (C) 1993-2007",
-  "@(#)EMail: fred AT thp.Uni-Duisburg.de",
-  "$Id: pstree.c,v 2.33 2009-11-10 22:12:39+01 fred Exp $"
+  "@(#)pstree $Revision: 2.39 $ by Fred Hucht (C) 1993-2015",
+  "@(#)EMail: fred AT thp.uni-due.de",
+  "$Id: pstree.c,v 2.39 2015/05/13 12:24:47 fred Exp $"
 };
 
 #define MAXLINE 8192
@@ -29,7 +29,10 @@ extern char *termdef(int, char);
 #  ifdef USE_GETPROCS
 #    define IFNEW(a,b) a
 #    define ProcInfo procsinfo
+#    ifndef _AIX61
+/* workaround contributed by Michael Staats <michael.staats AT gmx.de> */
 extern getprocs(struct procsinfo *, int, struct fdsinfo *, int, pid_t *, int);
+#    endif /*_AIX61*/
 #  else /*USE_GETPROCS*/
 #    define IFNEW(a,b) b
 #    define ProcInfo procinfo
@@ -37,7 +40,10 @@ extern getproc(struct procinfo *, int, int);
 extern getuser(struct procinfo *, int, void *, int);
 #  endif /*USE_GETPROCS*/
 
+#  ifndef _AIX61
+/* workaround contributed by Michael Staats <michael.staats AT gmx.de> */
 extern getargs(struct ProcInfo *, int, char *, int);
+#  endif /*_AIX61*/
 
 /*#  define PSCMD 	"ps -ekf"
   #  define PSFORMAT 	"%s %ld %ld %*20c %*s %[^\n]"*/
@@ -198,31 +204,30 @@ static struct TreeChars TreeChars[] = {
     /**/                                                            "",     "",     ""             }  /*UTF8*/
 }, *C;
 
-int MyPid, NProc, Columns, RootPid;
-short showall = TRUE, soption = FALSE, Uoption = FALSE, Hoption = FALSE, noption = FALSE, roption = FALSE;
-char *name = "", *str = NULL, *Progname;
-long ipid = -1;
-char *input = NULL;
+static int MyPid, NProc, Columns, RootPid;
+static short showall = TRUE, soption = FALSE, Uoption = FALSE;
+static char *name = "", *str = NULL, *Progname;
+static long ipid = -1;
+static char *input = NULL;
 
-int atLdepth=0;    /* LOPTION - track how deep in the print chain we are */
-int maxLdepth=100; /* LOPTION - will be changed by -l n option */
+static int atLdepth=0;    /* LOPTION - track how deep in the print chain we are */
+static int maxLdepth=100; /* LOPTION - will be changed by -l n option */
+static int compress = FALSE;
 
 #ifdef DEBUG
-int debug = FALSE;
+static int debug = FALSE;
 #endif
 
 struct Proc {
   long uid, pid, ppid, pgid;
   char name[32], cmd[MAXLINE];
   int  print;
-  int  selected;
-  int  hidden;
   long parent, child, sister;
   unsigned long thcount;
 } *P;
 
 #ifdef UID2USER
-void uid2user(uid_t uid, char *name, int len) {
+static void uid2user(uid_t uid, char *name, int len) {
 #define NUMUN 128
   static struct un_ {
     uid_t uid;
@@ -264,7 +269,7 @@ void uid2user(uid_t uid, char *name, int len) {
 #endif
 
 #if defined(_AIX) || defined(___AIX)	/* AIX 3.x / 4.x */
-int GetProcessesDirect(void) {
+static int GetProcessesDirect(void) {
   int i, nproc, maxnproc = 1024;
   
   struct ProcInfo *proc;
@@ -378,7 +383,7 @@ int GetProcessesDirect(void) {
 #endif /* _AIX */
 
 #ifdef __linux
-int GetProcessesDirect(void) {
+static int GetProcessesDirect(void) {
   glob_t globbuf;
   unsigned int i, j;
   
@@ -391,11 +396,23 @@ int GetProcessesDirect(void) {
   }
   
   for (i = j = 0; i < globbuf.gl_pathc; i++) {
-    char name[32];
+    char *pdir, name[32];
     int c;
     FILE *tn;
-    struct stat stat;
     int k = 0;
+    
+    pdir = globbuf.gl_pathv[globbuf.gl_pathc - i - 1];
+    
+    /* if processes change their UID this change is only reflected in the owner of pdir.
+     * fixed since version 2.36 */
+    {
+      struct stat st;
+      if (stat(pdir, &st) != 0) { /* get uid */
+	continue; /* process vanished since glob() */
+      }
+      P[j].uid = st.st_uid;
+      uid2user(P[j].uid, P[j].name, sizeof(P[j].name));
+    }
     
     snprintf(name, sizeof(name), "%s%s",
 	     globbuf.gl_pathv[globbuf.gl_pathc - i - 1], "/stat");
@@ -403,22 +420,18 @@ int GetProcessesDirect(void) {
     if (tn == NULL) continue; /* process vanished since glob() */
     fscanf(tn, "%ld %s %*c %ld %ld",
 	   &P[j].pid, P[j].cmd, &P[j].ppid, &P[j].pgid);
-    fstat(fileno(tn), &stat);
-    P[j].uid = stat.st_uid;
     fclose(tn);
     P[j].thcount = 1;
     
     snprintf(name, sizeof(name), "%s%s",
 	     globbuf.gl_pathv[globbuf.gl_pathc - i - 1], "/cmdline");
     tn = fopen(name, "r");
-    if (tn == NULL) continue;
+    if (tn == NULL) continue; /* process vanished since glob() */
     while (k < MAXLINE - 1 && EOF != (c = fgetc(tn))) {
       P[j].cmd[k++] = c == '\0' ? ' ' : c;
     }
     if (k > 0) P[j].cmd[k] = '\0';
     fclose(tn);
-    
-    uid2user(P[j].uid, P[j].name, sizeof(P[j].name));
     
 #ifdef DEBUG
     if (debug) fprintf(stderr,
@@ -434,7 +447,7 @@ int GetProcessesDirect(void) {
 }
 #endif /* __linux */
 
-int GetProcesses(void) {
+static int GetProcesses(void) {
   FILE *tn;
   int i = 0;
   char line[MAXLINE], command[] = PSCMD;
@@ -540,7 +553,7 @@ int GetProcesses(void) {
   return i;
 }
 
-int GetRootPid(void) {
+static int GetRootPid(void) {
   int me;
   for (me = 0; me < NProc; me++) {
     if (P[me].pid == 1) return P[me].pid;
@@ -582,8 +595,8 @@ void FixZombies(void) {
       P[me].pid = -1;
 #ifdef DEBUG
       if (debug) fprintf(stderr,
-			 "fixed zombie %s with ppid %d\n",
-			 P[me].cmd, P[me].ppid);
+			 "fixed zombie %s with ppid %ld\n",
+			 P[me].cmd, (long)P[me].ppid);
 #endif
     }
   }
@@ -598,7 +611,7 @@ int get_pid_index(long pid) {
 
 #define EXIST(idx) ((idx) != -1)
 
-void MakeTree(void) {
+static void MakeTree(void) {
   /* Build the process hierarchy. Every process marks itself as first child
    * of it's parent or as sister of first child of it's parent */
   int me;  
@@ -618,14 +631,14 @@ void MakeTree(void) {
   }
 }
 
-void MarkChildren(int me) {
+static void MarkChildren(int me) {
   int child;
   P[me].print = TRUE;
   for (child = P[me].child; EXIST(child); child = P[child].sister)
     MarkChildren(child);
 }
 
-void MarkProcs(void) {
+static void MarkProcs(void) {
   int me;
   for (me = 0; me < NProc; me++) {
     if (showall) {
@@ -640,11 +653,9 @@ void MarkProcs(void) {
 	     && NULL != strstr(P[me].cmd, str)
 	     && P[me].pid != MyPid)		/* for -s */
 	 ) {
-	P[me].selected = TRUE;
 	/* Mark parents */
 	for (parent = P[me].parent; EXIST(parent); parent = P[parent].parent) {
 	  P[parent].print = TRUE;
-	  if (Hoption) P[parent].hidden = TRUE;
 	}
 	/* Mark children */
 	MarkChildren(me);
@@ -671,7 +682,7 @@ void MarkProcs(void) {
   }
 }
 
-void DropProcs(void) {
+static void DropProcs(void) {
   int me;
   for (me = 0; me < NProc; me++) if (P[me].print) {
     int child, sister;
@@ -683,16 +694,15 @@ void DropProcs(void) {
     for (sister = P[me].sister;
 	 EXIST(sister) && !P[sister].print; sister = P[sister].sister);
     P[me].sister = sister;
-    if (roption && P[me].pid == 1)
-      P[me].hidden = TRUE;
   }
 }
 
-void PrintTree(int idx, const char *head) {
+static void PrintTree(int idx, const char *head) {
   char nhead[MAXLINE], out[4 * MAXLINE], thread[16] = {'\0'};
   int child;
   
   if (head[0] == '\0' && !P[idx].print) return;
+  /*if (!P[idx].print) return;*/
   
   if (P[idx].thcount > 1) snprintf(thread, sizeof(thread), "[%ld]", P[idx].thcount);
  
@@ -701,38 +711,51 @@ void PrintTree(int idx, const char *head) {
  
   
   snprintf(out, sizeof(out),
-	   "%s%s%s%s%s%s %5ld %s %s%s" /*" (ch=%d, si=%d, pr=%d)"*/,
+	   "%s%s%s%s%s%s %05ld %s %s%s" /*" (ch=%d, si=%d, pr=%d)"*/,
 	   C->sg,
 	   head,
 	   head[0] == '\0' ? "" : EXIST(P[idx].sister) ? C->barc : C->barl,
 	   EXIST(P[idx].child)       ? C->p   : C->s2,
 	   P[idx].pid == P[idx].pgid ? C->pgl : C->npgl,
 	   C->eg,
-	   P[idx].pid,
-	   !noption ? P[idx].name : "",
+	   P[idx].pid, P[idx].name,
 	   thread,
 	   P[idx].cmd
 	   /*,P[idx].child,P[idx].sister,P[idx].print*/);
   
   out[Columns-1] = '\0';
-  if (P[idx].hidden && !P[idx].selected) {
-    snprintf(nhead, sizeof(nhead), "%s", head);
-  } else {
-    puts(out);
+  puts(out);
   
-    /* Process children */
-    snprintf(nhead, sizeof(nhead), "%s%s ", head,
-        head[0] == '\0' ? "" : EXIST(P[idx].sister) ? C->bar : " ");
+  /* Process children */
+  snprintf(nhead, sizeof(nhead), "%s%s ", head,
+	   head[0] == '\0' ? "" : EXIST(P[idx].sister) ? C->bar : " ");
+
+  /*
+    if ( compress ) {
+    int c1, c2, flag = 0;
+    for ( c1 = P[idx].child; EXIST(c1); c1 = P[c1].sister ) {
+      for ( c2 = P[c1].sister; EXIST(c2); c2 = P[c2].sister ) {
+	if ( 0 == strcmp(P[c1].cmd, P[c2].cmd) ) {
+	  flag = 1;
+	  printf("%d:%d ", c1, c2);
+	  P[c1].pid = -1;
+	  P[c2].print = FALSE;
+	}
+      }
+    }
+    if ( flag ) printf("\n");
   }
-  
-  for (child = P[idx].child; EXIST(child); child = P[child].sister)
+  */
+
+  for (child = P[idx].child; EXIST(child); child = P[child].sister) {
     PrintTree(child, nhead);
+  }
 
   --atLdepth;                          /* LOPTION */
 
 }
 
-void Usage(void) {
+static void Usage(void) {
   fprintf(stderr,
 	  "%s\n"
 	  "%s\n\n"
@@ -740,7 +763,7 @@ void Usage(void) {
 #ifdef DEBUG
 	  "[-d] "
 #endif
-	  "[-f file] [-g n] [-u user] [-U] [-s string] [-H] [-p pid] [-w] [pid ...]\n"
+	  "[-f file] [-g n] [-l n] [-u user] [-U] [-s string] [-p pid] [-w] [pid ...]\n"
 	  /*"   -a        align output\n"*/
 #ifdef DEBUG
 	  "   -d        print debugging info to stderr\n"
@@ -751,14 +774,10 @@ void Usage(void) {
 	  "   -l n      print tree to n level deep\n"
 	  "   -u user   show only branches containing processes of <user>\n"
 	  "   -U        don't show branches containing only root processes\n"
-	  "   -s string show only branches containing process with <string> in commandline\n"
-	  "   -p pid    show only branches containing process <pid>\n"
-	  "   -H        show only selected subtrees (hide parents)\n"
-	  "   -n        hide usernames\n"
-	  "   -r        hide root process (pid 1)\n"
+          "   -s string show only branches containing process with <string> in commandline\n"
+          "   -p pid    show only branches containing process <pid>\n"
 	  "   -w        wide output, not truncated to window width\n"
-	  "   pid ...   process ids to start from, default is 1 (init)\n"
-	  "             use 0 to also show kernel processes\n"
+	  "   pid ...   process ids to start from, default is 1 (probably init)\n"
 	  , WhatString[0] + 4, WhatString[1] + 4, Progname, PSCMD);
 #ifdef HAS_PGID
   fprintf(stderr, "\n%sProcess group leaders are marked with '%s%s%s'.\n",
@@ -772,18 +791,21 @@ int main(int argc, char **argv) {
   extern char *optarg;
   int ch;
   long pid;
-  int graph = G_UTF8, wide = FALSE;
+  int graph = G_ASCII, wide = FALSE;
   
   C = &TreeChars[graph];
   
   Progname = strrchr(argv[0],'/');
   Progname = (NULL == Progname) ? argv[0] : Progname + 1;
   
-  while ((ch = getopt(argc, argv, "df:g:hl:p:s:u:Uw?Hnr")) != EOF)
+  while ((ch = getopt(argc, argv, "cdf:g:hl:p:s:u:Uw?")) != EOF)
     switch(ch) {
       /*case 'a':
 	align   = TRUE;
 	break;*/
+    case 'c':
+      compress = TRUE;
+      break;
 #ifdef DEBUG
     case 'd':
       debug   = TRUE;
@@ -805,15 +827,6 @@ int main(int argc, char **argv) {
       maxLdepth = atoi(optarg);               /* LOPTION */
       if(maxLdepth < 1) maxLdepth = 1;        /* LOPTION */
       break;                                  /* LOPTION */
-    case 'H':
-      Hoption = TRUE;
-      break;
-    case 'n':
-      noption = TRUE;
-      break;
-    case 'r':
-      roption = TRUE;
-      break;
     case 'p':
       showall = FALSE;
       ipid    = atoi(optarg);
@@ -887,12 +900,12 @@ int main(int argc, char **argv) {
     Columns = atoi((char*)termdef(fileno(stdout),'c'));
 #elif defined(TIOCGWINSZ)
     struct winsize winsize;
-    ioctl(fileno(stdout), TIOCGWINSZ, &winsize);
-    Columns = winsize.ws_col;
+    if ( ioctl(fileno(stdout), TIOCGWINSZ, &winsize) != -1 )
+      Columns = winsize.ws_col;
 #elif defined(TIOCGSIZE)
     struct ttysize ttysize;
-    ioctl(fileno(stdout), TIOCGSIZE, &ttysize);
-    Columns = ttysize.ts_cols;
+    if ( ioctl(fileno(stdout), TIOCGSIZE, &ttysize) != -1 )
+      Columns = ttysize.ts_cols;
 #else
     char *env = getenv("COLUMNS");
     Columns = env ? atoi(env) : 80;
@@ -943,24 +956,76 @@ static char * strstr(s1, s2)
 #endif /* NEED_STRSTR */
 
 #ifdef NEED_SNPRINTF
-/* Contributed by Michael E White */
-int snprintf(char *name, int namesiz, char *format, ...)
-{
-  int retval;
-  char bigbuf[1024] = {'\0'};  
-  va_list ap;
-  va_start(ap, format);
-  retval = vsprintf(bigbuf,format,ap);
-  va_end(ap);
-  if (retval > namesiz) retval = namesiz;
-  strncpy(name, bigbuf, retval);
-  name[retval] = '\0';
-  return retval;
+int snprintf (char *s, int namesiz, char *format, ...) {      
+  /* Original portable version by Michael E. White.
+     This version of Stan Sieler (sieler AT allegro.com) */
+
+  int  chars_needed;              /* not including trailing null */
+  
+  char bigbuf [1024] = {'\0'};    /* note: 1024 is a guess, and may not be large enough! */
+  
+  va_list ap;         /* some systems allow "va_list ap = NULL;", others *do not* (like MACH) */
+  
+  va_start (ap, format);
+  chars_needed = vsprintf (bigbuf, format, ap); /* note: chars_needed does not include trailing null */
+  va_end (ap);
+
+  /* 0 is documented as "don't write anything" ... while not specifically spelled out
+     (e.g., does it also mean "don't internally call vsprintf"?), one can imply that it simply means
+     "don't write to the output buffer 's'.  (Otherwise, if we didn't call vsprintf, we wouldn't
+     know what value of chars_needed to return!) */
+
+   if (namesiz <= 0)
+     ;     /* Don't touch 's' buffer at all! Note: on some systems, a negative namesiz
+	      will cause the process to abort. By checking for <= 0, not just 0, we differ
+	      in that area, but it's a reasonable difference. */
+   
+   else if (chars_needed >= namesiz)  
+     {     /* oh oh, output too large for 'name' buffer... */
+       memcpy (s, bigbuf, namesiz - 1);
+       s [namesiz - 1] = '\0';
+     }
+   
+   else    /* size is ok */
+     {
+       memcpy (s, bigbuf, chars_needed); /* chars_needed < namesiz */
+       s [chars_needed] = '\0';
+       /* note: above two could be replaced by strcpy (s, bigbuf)
+	  since we know strlen (bigbuf) is acceptable.  
+	  But, why copy byte at a time, comparing to null, when
+	  we *know* the length? */
+     }
+   
+   return chars_needed;    /* May be larger than namesiz, but that's ok
+			      In fact, not just 'ok', it's *useful*! */
 }
 #endif  /* NEED_SNPRINTF */
 
 /*
  * $Log: pstree.c,v $
+ * Revision 2.39  2015/05/13 12:24:47  fred
+ * Summary: Don't use uninitialized structs when ioctl() fails, e.g. if run with stdout
+ * redirected. Problem reported by Jan Stary.
+ *
+ * Revision 2.38  2015/04/20 14:50:42  fred
+ * Summary: Added patch for AIX61 contributed by Michael Staats
+ *
+ * Revision 2.37  2015/04/20 10:15:29  fred
+ * Summary: V2.36
+ *
+ * Revision 2.36  2013-04-12 11:47:03+02  fred
+ * Some processes like apache under a recent Linux were listed with UID
+ * root instead of the correct UID, as they use setuid(). We now read the
+ * UID from the owner of /proc/PID instead of /proc/PID/stat, as this
+ * seems to be updated correctly. Thanks to Tom Schmidt
+ * <tschmidt AT micron.com> for pointing out this bug.
+ *
+ * Revision 2.35  2013-02-28 08:33:02+01  fred
+ * Added Stan Sieler's fix to my adaption of snprintf fix by Stan Sieler :-)
+ *
+ * Revision 2.34  2013-02-27 16:57:25+01  fred
+ * Added snprintf fix by Stan Sieler
+ *
  * Revision 2.33  2009-11-10 22:12:39+01  fred
  * Added UTF8, enlarged MAXLINE
  *
